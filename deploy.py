@@ -274,7 +274,10 @@ def routes(name, service, definition_, container, sha):
         services[identifier] = {"loadBalancer": balance}
         routers[identifier] = router
         expected.append((identifier, url, checked))
-    return {"http": {"routers": routers, "services": services, "middlewares": middlewares}}, expected
+    configuration = {"http": {"routers": routers, "services": services}}
+    if middlewares:
+        configuration["http"]["middlewares"] = middlewares
+    return configuration, expected
 
 
 def confirm(host_settings, expected, removed=False):

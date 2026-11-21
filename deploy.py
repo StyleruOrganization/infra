@@ -38,6 +38,20 @@ def inspect(name):
     return json.loads(result.stdout)[0] if result.returncode == 0 else None
 
 
+def unpause_compose(project_name):
+    containers = run(
+        "docker", "ps", "--all",
+        "--filter", f"label=com.docker.compose.project={project_name}",
+        "--filter", "status=paused", "--format", "{{.Names}}",
+        capture=True,
+    ).splitlines()
+    for name in containers:
+        info = inspect(name)
+        if info and info["State"].get("Paused"):
+            print(f"Resuming paused infrastructure container {name}", flush=True)
+            run("docker", "unpause", name)
+
+
 def stop(name):
     if name and inspect(name):
         run("docker", "stop", "--timeout", "75", name)
@@ -99,6 +113,11 @@ def network(settings, host_settings):
     info = inspect(gateway)
     if info is None:
         raise RuntimeError("Start the shared host infrastructure first")
+    if info["State"].get("Paused"):
+        raise RuntimeError(
+            f"{gateway} is paused; resume it with docker unpause {gateway} "
+            "or apply infrastructure with --update-host"
+        )
     connections = info["NetworkSettings"]["Networks"]
     aliases = settings.get("gateway_aliases", [])
     if name not in connections:
@@ -729,6 +748,7 @@ def infrastructure(root, name, update_host, revision):
     if update_host:
         environment = render_host(root, host_name, host_settings)
         atomic_write(root / "control/buildkitd.toml", (REPOSITORY / "modules/buildkitd.toml").read_bytes())
+        unpause_compose("platform")
         subprocess.run([
             "docker", "compose", "--project-name", "platform", "--env-file", "/dev/null",
             "-f", str(host_paths(root) / "compose.yml"),
@@ -739,6 +759,7 @@ def infrastructure(root, name, update_host, revision):
     if settings.get("compose"):
         compose = under(REPOSITORY / "projects" / name, settings["compose"])
         atomic_write(directory / "compose.yml", compose.read_bytes())
+        unpause_compose(f"{name}-data")
         subprocess.run([
             "docker", "compose", "--project-name", f"{name}-data", "--env-file", "/dev/null",
             "-f", str(directory / "compose.yml"), "up", "--detach", "--wait", "--wait-timeout", "180",

@@ -1,0 +1,77 @@
+{
+  "host": "primary",
+  "network": "event-radar-internal",
+  "health_timeout_seconds": 180,
+  "environment": {
+    "bot": {
+      "TELEGRAM_BOT_TOKEN": {
+        "secret": "TELEGRAM_BOT_TOKEN"
+      },
+      "OWNER_TELEGRAM_ID": {
+        "secret": "OWNER_TELEGRAM_ID"
+      },
+      "TELEGRAM_API_ID": {
+        "secret": "TELEGRAM_API_ID"
+      },
+      "TELEGRAM_API_HASH": {
+        "secret": "TELEGRAM_API_HASH"
+      },
+      "TELEGRAM_READER_SESSION": {
+        "secret": "TELEGRAM_READER_SESSION"
+      },
+      "DATABASE_PATH": "/data/eventradar.sqlite3",
+      "CHATGPT_AUTH_DIR": "/data/chatgpt",
+      "CHATGPT_MODEL": "",
+      "DEFAULT_TIMEZONE": "Europe/Moscow",
+      "SOURCE_TIMEZONE": "Europe/Moscow",
+      "INITIAL_LOOKBACK_DAYS": 7,
+      "MAX_CHANNELS_PER_USER": 30,
+      "MAX_AI_CALLS_PER_DAY": 300,
+      "AI_BATCH_SIZE": 10,
+      "AI_BATCH_MAX_CHARACTERS": 30000,
+      "MAX_PHOTOS_PER_REPORT": 3
+    }
+  },
+  "services": {
+    "bot": {
+      "repository": "https://github.com/StyleruOrganization/event-radar.git",
+      "dockerfile": "Dockerfile",
+      "environment": "bot",
+      "strategy": "recreate",
+      "init": true,
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "tmpfs": [
+        "/tmp:size=16m,mode=1777"
+      ],
+      "volumes": [
+        {
+          "source": "data",
+          "target": "/data"
+        },
+        {
+          "source": "runtime/chatgpt",
+          "target": "/data/chatgpt"
+        }
+      ],
+      "health_command": "python -m eventradar.health",
+      "preflight": [
+        "python",
+        "-m",
+        "eventradar.deployment",
+        "preflight"
+      ],
+      "migration": [
+        "python",
+        "-m",
+        "eventradar.deployment",
+        "backup"
+      ]
+    }
+  }
+}

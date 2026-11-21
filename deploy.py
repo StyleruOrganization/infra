@@ -2,6 +2,7 @@
 """Deploy Docker projects from this inventory. Python 3.12+, Docker, Git and SOPS."""
 
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -169,6 +170,13 @@ def container_args(root, name, service, settings, service_settings, container, o
     ]
     if not one_off:
         args += ["--restart", "unless-stopped"]
+    if service_settings.get("init"):
+        args += ["--init"]
+    if service_settings.get("read_only"):
+        args += ["--read-only"]
+    for option, key in (("--cap-drop", "cap_drop"), ("--security-opt", "security_opt"), ("--tmpfs", "tmpfs")):
+        for value in service_settings.get(key, []):
+            args += [option, value]
     group = service_settings.get("environment")
     if group:
         slug(group)
@@ -345,7 +353,62 @@ def save_failure(root, name, service, container):
         print(f"Could not save candidate diagnostics: {type(error).__name__}", flush=True)
 
 
+def release_recreate(root, name, service, settings, service_settings, image, sha, revision):
+    if service_settings.get("routes") or service_settings.get("related"):
+        raise ValueError("Recreate releases support a single service without HTTP routes")
+    state_path = root / "projects" / name / "state.json"
+    state = read_json(state_path) if state_path.exists() else {}
+    for dependency in service_settings.get("depends_on", []):
+        if dependency not in state or not inspect(state[dependency]["container"]):
+            raise RuntimeError(f"Deploy dependency {dependency} first")
+    old = state.get(service)
+    old_available = bool(old and inspect(old["container"]))
+    color = "green" if old and old["color"] == "blue" else "blue"
+    container = f"{name}-{service}-{color}"
+    stop(container)
+    if service_settings.get("preflight"):
+        stop(f"{container}-preflight")
+        args = container_args(root, name, service, settings, service_settings, f"{container}-preflight", True)
+        run(*args, image, *service_settings["preflight"])
+    old_stopped = False
+    try:
+        if old_available:
+            # Keep the stopped container available with its original image and environment.
+            old_stopped = True
+            run("docker", "stop", "--timeout", "75", old["container"])
+        if service_settings.get("migration"):
+            stop(f"{container}-migration")
+            args = container_args(root, name, service, settings, service_settings, f"{container}-migration", True)
+            run(*args, image, *service_settings["migration"])
+        print(f"Starting candidate {container}", flush=True)
+        run(*container_args(root, name, service, settings, service_settings, container), image, *service_settings.get("command", []))
+        wait_healthy(container, settings, service_settings)
+        if service_settings.get("after_release"):
+            run("docker", "exec", container, *service_settings["after_release"])
+        update_target(root, name, service, service_settings, container)
+        state[service] = {
+            "container": container, "color": color, "image": image,
+            "sha": sha, "infrastructure_sha": revision,
+        }
+        write_json(state_path, state)
+    except BaseException:
+        save_failure(root, name, service, container)
+        stop(container)
+        if old_stopped:
+            run("docker", "start", old["container"])
+            print(f"Restored previous container {old['container']}; database backup is available for manual recovery.", flush=True)
+        raise
+    if old:
+        stop(old["container"])
+    return old["image"] if old else None
+
+
 def release_one(root, name, service, settings, service_settings, host_settings, image, sha, revision):
+    strategy = service_settings.get("strategy", "blue-green")
+    if strategy == "recreate":
+        return release_recreate(root, name, service, settings, service_settings, image, sha, revision)
+    if strategy != "blue-green":
+        raise ValueError(f"Unknown release strategy: {strategy}")
     state_path = root / "projects" / name / "state.json"
     state = read_json(state_path) if state_path.exists() else {}
     for dependency in service_settings.get("depends_on", []):
@@ -408,6 +471,15 @@ def release_one(root, name, service, settings, service_settings, host_settings, 
 
 
 def release(root, name, service, ref, revision):
+    slug(name)
+    directory = root / "projects" / name
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / "release.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        release_locked(root, name, service, ref, revision)
+
+
+def release_locked(root, name, service, ref, revision):
     validate_ref(ref)
     settings, service_settings = definition(name, service)
     host_settings = host(settings["host"])

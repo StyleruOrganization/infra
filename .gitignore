@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+!*.env.example
+*.key
+*.pem
+!*.enc.json
+local/
+.runtime/
+secrets.json
+secrets.decrypted.json
+*.agekey

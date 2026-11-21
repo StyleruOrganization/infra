@@ -1,0 +1,147 @@
+name: platform
+
+x-runtime: &runtime
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+  networks:
+    - edge
+
+services:
+  traefik:
+    <<: *runtime
+    image: traefik:v3.7.19
+    container_name: platform-traefik
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=120s
+      - --entrypoints.internal.address=:8081
+      - --entrypoints.grpc.address=:50051
+      - --entrypoints.admin.address=:8082
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --api=true
+      - --api.dashboard=false
+      - --ping=true
+      - --ping.entrypoint=admin
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?Set ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/certificates/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --metrics.prometheus=true
+      - --metrics.prometheus.entrypoint=admin
+      - --log.level=INFO
+      - --accesslog=true
+      - --accesslog.fields.defaultmode=drop
+      - --accesslog.fields.names.StartUTC=keep
+      - --accesslog.fields.names.RequestMethod=keep
+      - --accesslog.fields.names.RouterName=keep
+      - --accesslog.fields.names.DownstreamStatus=keep
+      - --accesslog.fields.names.Duration=keep
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:${TRAEFIK_ADMIN_PORT:?Set TRAEFIK_ADMIN_PORT}:8082"
+    volumes:
+      - ${HOST_ROOT:?Set HOST_ROOT}/dynamic:/etc/traefik/dynamic:ro
+      - certificates:/certificates
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8082/ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  alertmanager:
+    <<: *runtime
+    image: prom/alertmanager:v0.28.0
+    container_name: platform-alertmanager
+    user: "${PLATFORM_UID:?Set PLATFORM_UID}:${PLATFORM_GID:?Set PLATFORM_GID}"
+    command: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager]
+    volumes:
+      - ${HOST_ROOT:?Set HOST_ROOT}/data/alertmanager:/alertmanager
+      - ${HOST_ROOT:?Set HOST_ROOT}/alertmanager:/etc/alertmanager:ro
+
+  prometheus:
+    <<: *runtime
+    image: prom/prometheus:v3.2.1
+    container_name: platform-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=3GB
+    volumes:
+      - prometheus:/prometheus
+      - ${HOST_ROOT:?Set HOST_ROOT}/monitoring:/etc/prometheus:ro
+      - ${HOST_ROOT:?Set HOST_ROOT}/targets:/etc/prometheus/targets:ro
+
+  grafana:
+    <<: *runtime
+    image: grafana/grafana:11.6.0
+    container_name: platform-grafana
+    env_file:
+      - path: ${HOST_ROOT:?Set HOST_ROOT}/env/grafana.env
+        format: raw
+    volumes:
+      - grafana:/var/lib/grafana
+      - ${HOST_ROOT:?Set HOST_ROOT}/grafana:/etc/grafana/provisioning:ro
+
+  portainer:
+    <<: *runtime
+    image: portainer/portainer-ce:2.45.4
+    container_name: platform-portainer
+    command: [--host, unix:///var/run/docker.sock, --http-enabled, --admin-password-file, /run/secrets/admin-password]
+    environment:
+      PORTAINER_TRUSTED_ORIGINS: https://${PORTAINER_DOMAIN:?Set PORTAINER_DOMAIN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer:/data
+      - ${HOST_ROOT:?Set HOST_ROOT}/auth/portainer-password.txt:/run/secrets/admin-password:ro
+
+  cadvisor:
+    <<: *runtime
+    image: ghcr.io/google/cadvisor:0.60.6
+    container_name: platform-cadvisor
+    privileged: true
+    cgroup: host
+    command:
+      - --docker_only=true
+      - --store_container_labels=false
+      - --enable_metrics=cpu,memory,network,diskIO
+      - --housekeeping_interval=15s
+      - --max_housekeeping_interval=15s
+      - --storage_duration=1m
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+
+  node-exporter:
+    <<: *runtime
+    image: prom/node-exporter:v1.9.1
+    container_name: platform-node-exporter
+    pid: host
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/rootfs
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/rootfs:ro
+
+networks:
+  edge:
+    name: ${EDGE_NETWORK:?Set EDGE_NETWORK}
+
+volumes:
+  certificates:
+  prometheus:
+  grafana:
+  portainer:

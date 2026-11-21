@@ -1,0 +1,10 @@
+{
+  "ssh_secrets_prefix": "SERVER",
+  "root": "/opt/platform-infra",
+  "network": "platform-edge",
+  "gateway_container": "platform-traefik",
+  "admin_port": 18082,
+  "grafana_domain": "grafana.termeet.tech",
+  "portainer_domain": "containers.termeet.tech",
+  "alerts_project": "termeet"
+}

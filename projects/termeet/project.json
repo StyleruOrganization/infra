@@ -1,0 +1,276 @@
+{
+  "host": "primary",
+  "network": "termeet-internal",
+  "gateway_aliases": [
+    "termeet-api.internal",
+    "termeet-grpc.internal"
+  ],
+  "compose": "compose.yml",
+  "health_timeout_seconds": 180,
+  "drain_seconds": 15,
+  "environment": {
+    "backend": {
+      "POSTGRES_USER": "termeet",
+      "POSTGRES_PASSWORD": {
+        "secret": "POSTGRES_PASSWORD"
+      },
+      "POSTGRES_DB": "termeet",
+      "POSTGRES_HOST": "termeet-postgres",
+      "POSTGRES_PORT": 5432,
+      "CLIENT_ID": {
+        "secret": "CLIENT_ID"
+      },
+      "CLIENT_SECRET": {
+        "secret": "CLIENT_SECRET"
+      },
+      "REDIRECT_URI": "https://termeet.tech/auth/yandex",
+      "HTTPS_TRUE": true,
+      "EMAIL_HOST": "smtp.yandex.ru",
+      "EMAIL_PORT": 465,
+      "EMAIL_USERNAME": {
+        "secret": "EMAIL_USERNAME"
+      },
+      "EMAIL_PASSWORD": {
+        "secret": "EMAIL_PASSWORD"
+      },
+      "VERIFICATION_LINK": "https://termeet.tech/auth/confirm",
+      "RESET_PASSWORD_LINK": "https://termeet.tech/auth/reset",
+      "USE_MAILDEV": false,
+      "RABBIT_HOST": "termeet-rabbitmq",
+      "RABBIT_PORT": 5672,
+      "RABBIT_USER": "termeet",
+      "RABBIT_PASSWORD": {
+        "secret": "RABBITMQ_PASSWORD"
+      },
+      "S3_BUCKET_NAME": "termeet",
+      "S3_ENDPOINT": "http://termeet-storage:9000",
+      "S3_ACCESS_KEY": "termeet-storage",
+      "S3_SECRET_KEY": {
+        "secret": "S3_SECRET_KEY"
+      },
+      "GRPC_HOST": "0.0.0.0",
+      "GRPC_PORT": 50051,
+      "TELEGRAM_BOT_USERNAME": {
+        "secret": "TELEGRAM_BOT_USERNAME"
+      },
+      "TELEGRAM_BOT_SECRET": {
+        "secret": "TELEGRAM_BOT_SECRET"
+      },
+      "TELEGRAM_BOT_TOKEN": {
+        "secret": "TELEGRAM_BOT_TOKEN"
+      }
+    },
+    "bot": {
+      "TELEGRAM_TOKEN": {
+        "secret": "TELEGRAM_BOT_TOKEN"
+      },
+      "TELEGRAM_TERMEET_DOMAIN": "https://termeet.tech",
+      "TELEGRAM_BACKEND_API_URL": "http://termeet-api.internal:8081/api",
+      "TELEGRAM_BOT_SECRET": {
+        "secret": "TELEGRAM_BOT_SECRET"
+      },
+      "TELEGRAM_WEBHOOK_URL": "https://termeet.tech/telegram/webhook",
+      "TELEGRAM_WEBHOOK_SECRET": {
+        "secret": "TELEGRAM_WEBHOOK_SECRET"
+      },
+      "TELEGRAM_STATE_PATH": "/data/bot.sqlite3",
+      "TELEGRAM_CHAT_IDS_FOR_FEEDBACK": {
+        "secret": "TELEGRAM_CHAT_IDS_FOR_FEEDBACK"
+      },
+      "TELEGRAM_THREAD_IDS_FOR_FEEDBACK": {
+        "secret": "TELEGRAM_THREAD_IDS_FOR_FEEDBACK"
+      },
+      "RABBIT_HOST": "termeet-rabbitmq",
+      "RABBIT_PORT": 5672,
+      "RABBIT_USER": "termeet",
+      "RABBIT_PASSWORD": {
+        "secret": "RABBITMQ_PASSWORD"
+      },
+      "S3_BUCKET_NAME": "termeet",
+      "S3_ENDPOINT": "http://termeet-storage:9000",
+      "S3_ACCESS_KEY": "termeet-storage",
+      "S3_SECRET_KEY": {
+        "secret": "S3_SECRET_KEY"
+      },
+      "GRPC_HOST": "termeet-grpc.internal",
+      "GRPC_PORT": 50051,
+      "CLAUDE_API_KEY": ""
+    },
+    "postgres": {
+      "POSTGRES_USER": "termeet",
+      "POSTGRES_DB": "termeet",
+      "POSTGRES_PASSWORD": {
+        "secret": "POSTGRES_PASSWORD"
+      }
+    },
+    "rabbitmq": {
+      "RABBITMQ_DEFAULT_USER": "termeet",
+      "RABBITMQ_DEFAULT_PASS": {
+        "secret": "RABBITMQ_PASSWORD"
+      }
+    },
+    "storage": {
+      "MINIO_ROOT_USER": "termeet-storage",
+      "MINIO_ROOT_PASSWORD": {
+        "secret": "S3_SECRET_KEY"
+      }
+    }
+  },
+  "files": {
+    "certs/jwt-private.pem": {
+      "secret": "JWT_PRIVATE_KEY"
+    },
+    "certs/jwt-public.pem": {
+      "secret": "JWT_PUBLIC_KEY"
+    }
+  },
+  "alerts": {
+    "token": {
+      "secret": "TELEGRAM_BOT_TOKEN"
+    },
+    "chat_id": {
+      "secret": "TELEGRAM_ALERTS_CHAT_ID"
+    },
+    "thread_id": {
+      "secret": "TELEGRAM_ALERTS_THREAD_ID"
+    }
+  },
+  "services": {
+    "frontend": {
+      "repository": "https://github.com/StyleruOrganization/Termeet-front.git",
+      "dockerfile": "infra/Dockerfile",
+      "depends_on": [
+        "backend"
+      ],
+      "health": {
+        "port": 80,
+        "path": "/health"
+      },
+      "routes": [
+        {
+          "host": "termeet.tech",
+          "port": 80,
+          "priority": 1
+        }
+      ]
+    },
+    "backend": {
+      "repository": "https://github.com/StyleruOrganization/Termeet-backend.git",
+      "dockerfile": "Dockerfile.prod",
+      "environment": "backend",
+      "volumes": [
+        {
+          "source": "certs",
+          "target": "/code/backend/certs",
+          "read_only": true
+        }
+      ],
+      "health": {
+        "port": 8000,
+        "path": "/health"
+      },
+      "metrics": {
+        "port": 8000,
+        "job": "backend"
+      },
+      "migration": [
+        "alembic",
+        "-c",
+        "backend/alembic.ini",
+        "upgrade",
+        "head"
+      ],
+      "related": [
+        "reminders"
+      ],
+      "routes": [
+        {
+          "host": "termeet.tech",
+          "port": 8000,
+          "path_prefix": "/api",
+          "strip_prefix": "/api",
+          "priority": 100
+        },
+        {
+          "host": "termeet-api.internal",
+          "port": 8000,
+          "entrypoint": "internal",
+          "path_prefix": "/api",
+          "strip_prefix": "/api"
+        },
+        {
+          "host": "termeet-grpc.internal",
+          "port": 50051,
+          "entrypoint": "grpc",
+          "scheme": "h2c",
+          "health_check": false
+        }
+      ]
+    },
+    "bot": {
+      "repository": "https://github.com/StyleruOrganization/Termeet-bot.git",
+      "dockerfile": "Dockerfile",
+      "environment": "bot",
+      "depends_on": [
+        "backend"
+      ],
+      "volumes": [
+        {
+          "source": "data/bot",
+          "target": "/data"
+        }
+      ],
+      "health": {
+        "port": 8080,
+        "path": "/health"
+      },
+      "metrics": {
+        "port": 8080,
+        "job": "bot"
+      },
+      "preflight": [
+        "python",
+        "-m",
+        "bot.src.preflight"
+      ],
+      "after_release": [
+        "python",
+        "-m",
+        "bot.src.webhook",
+        "register"
+      ],
+      "routes": [
+        {
+          "host": "termeet.tech",
+          "port": 8080,
+          "path": "/telegram/webhook",
+          "priority": 200
+        }
+      ]
+    },
+    "reminders": {
+      "image_from": "backend",
+      "environment": "backend",
+      "volumes": [
+        {
+          "source": "certs",
+          "target": "/code/backend/certs",
+          "read_only": true
+        }
+      ],
+      "depends_on": [
+        "backend"
+      ],
+      "command": [
+        "python",
+        "-m",
+        "backend.src.notifications.worker"
+      ],
+      "health_command": "python -c \"from pathlib import Path; import time; assert time.time()-Path('/tmp/reminders-heartbeat').stat().st_mtime < 180\"",
+      "metrics": {
+        "port": 9091,
+        "job": "reminders"
+      }
+    }
+  }
+}

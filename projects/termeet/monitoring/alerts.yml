@@ -1,0 +1,157 @@
+groups:
+  - name: termeet_backend_alerts
+    rules:
+      - alert: BackendNotReady
+        expr: termeet_backend_ready{project="termeet",job="backend"} == 0
+        for: 30s
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "🔥 Backend не готов принимать запросы"
+          description: "Backend {{ $labels.instance }} не проходит readiness: проверьте PostgreSQL, RabbitMQ и live-соединение."
+
+      - alert: ReminderWorkerStalled
+        expr: time() - termeet_reminders_last_success_timestamp_seconds{project="termeet"} > 300
+        for: 1m
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "⚠️ Не выполняются напоминания"
+          description: "Процесс напоминаний не завершал успешный цикл более пяти минут."
+
+      - alert: ReminderWorkerDown
+        expr: up{project="termeet",job="reminders"} == 0
+        for: 1m
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "🔥 Процесс напоминаний недоступен"
+          description: "Prometheus не получает метрики процесса напоминаний."
+
+      - alert: BackendDown
+        expr: up{project="termeet",job="backend"} == 0
+        for: 0s
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "🔥 Сервис Termeet Backend недоступен"
+          description: "FastAPI backend-prod упал или не отвечает на запросы."
+
+      - alert: Backend5xxErrorDetected
+        expr: sum(rate(http_requests_total{project="termeet",status=~"5.."}[1m])) > 0
+        for: 0s
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "🔥 Зафиксирована ошибка 5xx на бэкенде"
+          description: "Сервер вернул клиенту 5xx ошибку (внутренний сбой API)."
+
+      - alert: BackendHighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{project="termeet"}[1m])) by (le)) > 0.8
+        for: 30s
+        labels:
+          project: termeet
+          severity: warning
+        annotations:
+          summary: "⚠️ Задержка ответов API p95 > 800мс"
+          description: "95-й перцентиль задержки ответов бэкенда составляет {{ $value | printf \"%.2f\" }}с."
+
+  - name: termeet_frontend_alerts
+    rules:
+      - alert: FrontendClientErrorDetected
+        expr: sum(rate(frontend_client_errors_total{project="termeet"}[1m])) > 0
+        for: 0s
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "🔥 Зафиксирована ошибка в интерфейсе у пользователя"
+          description: "В браузере клиента произошел сбой / перехвачена JS-ошибка."
+
+      - alert: FrontendSlowLCP
+        expr: histogram_quantile(0.75, sum(rate(frontend_web_vital_duration_seconds_bucket{project="termeet",metric="LCP"}[1m])) by (le)) > 3.0
+        for: 30s
+        labels:
+          project: termeet
+          severity: warning
+        annotations:
+          summary: "⚠️ Медленная отрисовка контента LCP p75 > 3.0с"
+          description: "У 75% пользователей Largest Contentful Paint превышает 3 секунды (сейчас {{ $value | printf \"%.2f\" }}с)."
+
+      - alert: FrontendSlowFCP
+        expr: histogram_quantile(0.75, sum(rate(frontend_web_vital_duration_seconds_bucket{project="termeet",metric="FCP"}[1m])) by (le)) > 2.0
+        for: 30s
+        labels:
+          project: termeet
+          severity: warning
+        annotations:
+          summary: "⚠️ Долгая первая отрисовка FCP p75 > 2.0с"
+          description: "Первый контент отрисовывается медленнее 2 секунд (сейчас {{ $value | printf \"%.2f\" }}с)."
+
+      - alert: FrontendSlowINP
+        expr: histogram_quantile(0.75, sum(rate(frontend_web_vital_duration_seconds_bucket{project="termeet",metric="INP"}[1m])) by (le)) > 0.3
+        for: 30s
+        labels:
+          project: termeet
+          severity: warning
+        annotations:
+          summary: "⚠️ Фризы интерфейса / лаги слотов INP p75 > 300мс"
+          description: "Задержка реакции интерфейса на действия пользователя превышает 300мс (сейчас {{ $value | printf \"%.2f\" }}с)."
+
+      - alert: FrontendHighCLS
+        expr: histogram_quantile(0.75, sum(rate(frontend_cumulative_layout_shift_score_bucket{project="termeet"}[1m])) by (le)) > 0.15
+        for: 30s
+        labels:
+          project: termeet
+          severity: warning
+        annotations:
+          summary: "⚠️ Сдвиги верстки CLS p75 > 0.15"
+          description: "Сдвиг элементов страницы при загрузке превышает норму (индекс CLS {{ $value | printf \"%.2f\" }})."
+
+      - alert: FrontendSlowTTFB
+        expr: histogram_quantile(0.75, sum(rate(frontend_web_vital_duration_seconds_bucket{project="termeet",metric="TTFB"}[1m])) by (le)) > 1.0
+        for: 30s
+        labels:
+          project: termeet
+          severity: warning
+        annotations:
+          summary: "⚠️ Медленный ответ сервера TTFB p75 > 1.0с"
+          description: "Время до получения первого байта страницы превышает 1.0с (сейчас {{ $value | printf \"%.2f\" }}с)."
+
+  - name: termeet_bot_alerts
+    rules:
+      - alert: BotDown
+        expr: up{project="termeet",job="bot"} == 0 or termeet_bot_ready{project="termeet",job="bot"} == 0
+        for: 30s
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "🔥 Telegram-бот недоступен"
+          description: "Webhook бота {{ $labels.instance }} не отвечает или не готов принимать события."
+
+      - alert: BotUpdateFailed
+        expr: termeet_bot_failed_updates{project="termeet"} > 0
+        for: 0s
+        labels:
+          project: termeet
+          severity: critical
+        annotations:
+          summary: "⚠️ События Telegram требуют разбора"
+          description: "В inbox бота {{ $value }} событий, исчерпавших попытки обработки. Они сохранены в SQLite."
+
+      - alert: BotUpdateBacklog
+        expr: termeet_bot_pending_updates{project="termeet"} > 20
+        for: 5m
+        labels:
+          project: termeet
+          severity: warning
+        annotations:
+          summary: "⚠️ Растёт очередь событий Telegram"
+          description: "Более пяти минут в очереди бота находится свыше 20 необработанных событий."
+

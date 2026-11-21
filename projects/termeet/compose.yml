@@ -1,0 +1,65 @@
+name: termeet-data
+
+x-runtime: &runtime
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+  networks:
+    - internal
+
+services:
+  postgres:
+    <<: *runtime
+    image: postgres:17-alpine
+    container_name: termeet-postgres
+    env_file:
+      - path: ${PROJECT_ROOT:?Set PROJECT_ROOT}/env/postgres.env
+        format: raw
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  rabbitmq:
+    <<: *runtime
+    image: rabbitmq:3-management-alpine
+    hostname: termeet-rabbitmq
+    container_name: termeet-rabbitmq
+    env_file:
+      - path: ${PROJECT_ROOT:?Set PROJECT_ROOT}/env/rabbitmq.env
+        format: raw
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  storage:
+    <<: *runtime
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    container_name: termeet-storage
+    command: [server, /data, --console-address, ":9001"]
+    env_file:
+      - path: ${PROJECT_ROOT:?Set PROJECT_ROOT}/env/storage.env
+        format: raw
+    volumes:
+      - storage:/data
+
+networks:
+  internal:
+    external: true
+    name: termeet-internal
+
+volumes:
+  postgres:
+  rabbitmq:
+  storage:

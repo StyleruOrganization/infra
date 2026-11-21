@@ -1,0 +1,67 @@
+name: Release infrastructure
+run-name: "Infrastructure ${{ inputs.project }} · ${{ github.sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Project name from projects/
+        required: true
+        default: termeet
+        type: string
+      update_host:
+        description: Also create or update shared Traefik, Grafana, Portainer and monitoring
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve project and host
+        id: target
+        env:
+          PROJECT: ${{ inputs.project }}
+        run: python3 deploy.py target "$PROJECT" --output "$GITHUB_OUTPUT"
+
+      - name: Require a trusted host fingerprint
+        shell: bash
+        env:
+          FINGERPRINT: ${{ secrets[format('{0}_SSH_FINGERPRINT', steps.target.outputs.secrets_prefix)] }}
+        run: |
+          if ! [[ "$FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]; then
+            echo "Set the host SSH fingerprint in this infrastructure repository's secrets."
+            exit 1
+          fi
+
+      - name: Apply infrastructure on the server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          INFRA_SHA: ${{ github.sha }}
+          INFRA_ROOT: ${{ steps.target.outputs.root }}
+          PROJECT: ${{ inputs.project }}
+          UPDATE_HOST: ${{ inputs.update_host }}
+        with:
+          host: ${{ secrets[format('{0}_HOST', steps.target.outputs.secrets_prefix)] }}
+          username: ${{ secrets[format('{0}_USER', steps.target.outputs.secrets_prefix)] }}
+          key: ${{ secrets[format('{0}_SSH_PRIVATE_KEY', steps.target.outputs.secrets_prefix)] }}
+          fingerprint: ${{ secrets[format('{0}_SSH_FINGERPRINT', steps.target.outputs.secrets_prefix)] }}
+          envs: INFRA_SHA,INFRA_ROOT,PROJECT,UPDATE_HOST
+          command_timeout: 25m
+          script: |
+            set -eu
+            if [ "$UPDATE_HOST" = true ]; then
+              python3 "$INFRA_ROOT/control/dispatch.py" "$INFRA_SHA" infrastructure "$PROJECT" --update-host
+            else
+              python3 "$INFRA_ROOT/control/dispatch.py" "$INFRA_SHA" infrastructure "$PROJECT"
+            fi

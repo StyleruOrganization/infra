@@ -1,0 +1,39 @@
+groups:
+  - name: host_alerts
+    rules:
+      - alert: ContainerMetricsUnavailable
+        expr: up{job="cadvisor"} == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Недоступны метрики Docker-контейнеров"
+          description: "Prometheus не может получить метрики cAdvisor {{ $labels.instance }} более минуты. Графики контейнеров не обновляются."
+
+      - alert: HostDiskRunningOut
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 20
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔥 Мало места на диске (< 20%)"
+          description: "На сервере осталось менее 20% свободного места на корневом диске (доступно {{ $value | printf \"%.1f\" }}%)."
+
+      - alert: HostHighCpuLoad
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100) > 80
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Высокая загрузка CPU (> 80%)"
+          description: "Средняя загрузка процессора сервера превышает 80% (сейчас {{ $value | printf \"%.1f\" }}%)."
+
+      - alert: HostHighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "⚠️ Высокое потребление оперативной памяти (> 85%)"
+          description: "Использование RAM хоста превышает 85% (сейчас {{ $value | printf \"%.1f\" }}%)."
+

@@ -528,7 +528,7 @@ def render_monitoring(root, host_name):
     } for job, address, path in static]
     scrapes.append({
         "job_name": "applications", "honor_labels": False,
-        "file_sd_configs": [{"files": ["/etc/prometheus/targets/*.json"], "refresh_interval": "5s"}],
+        "file_sd_configs": [{"files": ["/etc/prometheus-targets/*.json"], "refresh_interval": "5s"}],
     })
     write_json(monitoring / "prometheus.yml", {
         "global": {"scrape_interval": "15s", "evaluation_interval": "15s"},

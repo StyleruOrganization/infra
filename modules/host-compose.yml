@@ -77,7 +77,7 @@ services:
     volumes:
       - prometheus:/prometheus
       - ${HOST_ROOT:?Set HOST_ROOT}/monitoring:/etc/prometheus:ro
-      - ${HOST_ROOT:?Set HOST_ROOT}/targets:/etc/prometheus/targets:ro
+      - ${HOST_ROOT:?Set HOST_ROOT}/targets:/etc/prometheus-targets:ro
 
   grafana:
     <<: *runtime

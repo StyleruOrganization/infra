@@ -39,7 +39,7 @@ def inspect(name):
 
 def stop(name):
     if name and inspect(name):
-        run("docker", "stop", "--time", "75", name)
+        run("docker", "stop", "--timeout", "75", name)
         run("docker", "rm", name)
 
 
@@ -198,12 +198,21 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def wait_healthy(name, settings, service_settings):
-    deadline = time.monotonic() + settings.get("health_timeout_seconds", 180)
+    started = time.monotonic()
+    deadline = started + settings.get("health_timeout_seconds", 180)
+    next_report = started
     opener = urllib.request.build_opener(NoRedirect)
     while time.monotonic() < deadline:
         info = inspect(name)
         if info is None or info["State"]["Status"] in ("exited", "dead"):
             raise RuntimeError(f"{name} stopped before readiness; see its logs in Portainer")
+        if info.get("RestartCount", 0):
+            raise RuntimeError(f"{name} restarted before reaching readiness")
+        if time.monotonic() >= next_report:
+            health_status = info["State"].get("Health", {}).get("Status", "not configured")
+            elapsed = int(time.monotonic() - started)
+            print(f"Waiting for {name}: {elapsed}s, state={info['State']['Status']}, health={health_status}", flush=True)
+            next_report = time.monotonic() + 15
         if service_settings.get("health"):
             health = service_settings["health"]
             address = info["NetworkSettings"]["Networks"][settings["network"]]["IPAddress"]
@@ -223,7 +232,7 @@ def wait_healthy(name, settings, service_settings):
             if status == "healthy":
                 return
         time.sleep(2)
-    raise RuntimeError(f"{name} readiness timeout; the previous version remains running")
+    raise RuntimeError(f"{name} readiness timeout")
 
 
 def routes(name, service, definition_, container, sha):
@@ -310,6 +319,29 @@ def update_target(root, project_name, service, service_settings, container):
         target.unlink(missing_ok=True)
 
 
+def save_failure(root, name, service, container):
+    try:
+        info = inspect(container)
+        if info is None:
+            return
+        logs = subprocess.run(
+            ["docker", "logs", "--tail", "100", container],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        ).stdout.decode("utf-8", errors="replace")
+        directory = root / "projects" / name / "diagnostics"
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = directory / f"{service}-last-failure.log"
+        content = json.dumps({
+            "container": container,
+            "state": info["State"],
+            "restarts": info.get("RestartCount", 0),
+        }, ensure_ascii=False, indent=2) + "\n\n" + logs
+        atomic_write(path, content[-65536:], 0o600)
+        print(f"Last failure details saved on the server: {path}", flush=True)
+    except Exception as error:
+        print(f"Could not save candidate diagnostics: {type(error).__name__}", flush=True)
+
+
 def release_one(root, name, service, settings, service_settings, host_settings, image, sha, revision):
     state_path = root / "projects" / name / "state.json"
     state = read_json(state_path) if state_path.exists() else {}
@@ -327,13 +359,17 @@ def release_one(root, name, service, settings, service_settings, host_settings, 
     cleanup_candidate = True
     try:
         if service_settings.get("migration"):
+            print(f"Applying migrations for {name}/{service}", flush=True)
             args = container_args(root, name, service, settings, service_settings, f"{container}-migration", True)
             run(*args, image, *service_settings["migration"])
+        print(f"Starting candidate {container}", flush=True)
         run(*container_args(root, name, service, settings, service_settings, container), image, *service_settings.get("command", []))
         wait_healthy(container, settings, service_settings)
+        print(f"Candidate {container} is ready", flush=True)
         if service_settings.get("preflight"):
             run("docker", "exec", container, *service_settings["preflight"])
         if expected:
+            print(f"Switching routes to {container}", flush=True)
             cleanup_candidate = False
             write_json(route_path, generated)
             try:
@@ -362,6 +398,7 @@ def release_one(root, name, service, settings, service_settings, host_settings, 
             stop(old["container"])
         return old["image"] if old else None
     except BaseException:
+        save_failure(root, name, service, container)
         if cleanup_candidate:
             stop(container)
         raise

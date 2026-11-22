@@ -155,3 +155,20 @@ groups:
           summary: "⚠️ Растёт очередь событий Telegram"
           description: "Более пяти минут в очереди бота находится свыше 20 необработанных событий."
 
+  - name: termeet_billing_alerts
+    rules:
+      - alert: VpsRenewalReminder
+        # day_of_month uses UTC. The billing calendar uses Moscow time (UTC+3).
+        expr: |
+          (11 - day_of_month(vector(time() + 3 * 60 * 60)) == 5)
+          or
+          (11 - day_of_month(vector(time() + 3 * 60 * 60)) == 3)
+        labels:
+          project: termeet
+          severity: info
+          days_before: '{{ $value | printf "%.0f" }}'
+        annotations:
+          summary: "💳 До списания за VPS Termeet — {{ $labels.days_before }} дн."
+          description: |-
+            @kiryshka2205 @d10110101
+            Проверьте баланс U1HOST. Оплата VPS списывается 11-го числа каждого месяца.

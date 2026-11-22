@@ -605,18 +605,30 @@ def render_alertmanager(root, host_name, host_settings):
         if not isinstance(token, str) or "\n" in token or not token.strip():
             raise ValueError(f"{name}: invalid Telegram token")
         atomic_write(tokens / name, token, 0o600)
-        receivers.append({
-            "name": name,
-            "telegram_configs": [{
-                "bot_token_file": f"/etc/alertmanager/tokens/{name}",
-                "chat_id": int(values["chat_id"]),
-                "message_thread_id": int(values["thread_id"]),
-                "parse_mode": "",
-                "send_resolved": True,
-                "message": '{{ range .Alerts }}{{ .Status }}: {{ .Annotations.summary }}\n{{ .Annotations.description }}\n{{ end }}',
-            }],
-        })
-        routes_.append({"receiver": name, "matchers": [f'project="{name}"']})
+        telegram = {
+            "bot_token_file": f"/etc/alertmanager/tokens/{name}",
+            "chat_id": int(values["chat_id"]),
+            "message_thread_id": int(values["thread_id"]),
+            "parse_mode": "",
+            "send_resolved": True,
+            "message": '{{ range .Alerts }}{{ .Status }}: {{ .Annotations.summary }}\n{{ .Annotations.description }}\n{{ end }}',
+        }
+        receivers.append({"name": name, "telegram_configs": [telegram]})
+        route = {"receiver": name, "matchers": [f'project="{name}"']}
+        reminder_alert = values.get("reminder_alert")
+        if reminder_alert:
+            reminder_receiver = f"{name}/reminder"
+            receivers.append({
+                "name": reminder_receiver,
+                "telegram_configs": [{**telegram, "send_resolved": False}],
+            })
+            route["routes"] = [{
+                "receiver": reminder_receiver,
+                "matchers": [f"alertname={json.dumps(reminder_alert)}"],
+                "group_by": ["project", "alertname", "days_before"],
+                "repeat_interval": "48h",
+            }]
+        routes_.append(route)
     default = host_settings["alerts_project"]
     if default not in {item["name"] for item in receivers}:
         raise RuntimeError("The host's default alert destination has not been configured")

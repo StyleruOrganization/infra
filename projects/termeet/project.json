@@ -133,7 +133,8 @@
     },
     "thread_id": {
       "secret": "TELEGRAM_ALERTS_THREAD_ID"
-    }
+    },
+    "reminder_alert": "VpsRenewalReminder"
   },
   "services": {
     "frontend": {
